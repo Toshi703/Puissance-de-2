@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Recherche Turbo Multi-threads - Puissances de 2</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #121214; color: #e4e4e7; padding: 2rem; }
+        .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 1.5rem; max-width: 800px; margin: 0 auto; }
+        input, button { padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid #3f3f46; background: #27272a; color: white; font-size: 1rem; }
+        button { background: #2563eb; font-weight: bold; cursor: pointer; border: none; }
+        button:hover { background: #1d4ed8; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.5rem; }
+        .stat-box { background: #09090b; padding: 1rem; border-radius: 8px; text-align: center; }
+        .stat-val { font-size: 1.5rem; font-weight: bold; color: #38bdf8; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>🚀 Search Engine Multi-cœurs (Web Workers)</h2>
+        <p>Recherche ultra-rapide distribuée sur tous les cœurs du processeur.</p>
+        
+        <div style="display:flex; gap:10px; margin-bottom: 1rem;">
+            <input type="text" id="pattern" value="0123456789" placeholder="Motif recherché">
+            <button id="startBtn">Lancer la recherche</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-box"><div>Cœurs utilisés</div><div class="stat-val" id="threadsVal">-</div></div>
+            <div class="stat-box"><div>Exposant actuel (n)</div><div class="stat-val" id="currentN">0</div></div>
+            <div class="stat-box"><div>Vitesse</div><div class="stat-val" id="speedVal">0 op/s</div></div>
+        </div>
+
+        <div id="result" style="margin-top: 1.5rem;"></div>
+    </div>
+
+    <script>
+        const workerCode = `
+            self.onmessage = function(e) {
+                const { start, step, pattern, chunkSize } = e.data;
+                let n = start;
+                
+                for(let i = 0; i < chunkSize; i++) {
+                    let valStr = (BigInt(2) ** BigInt(n)).toString();
+                    let pos = valStr.indexOf(pattern);
+                    if(pos !== -1) {
+                        self.postMessage({ found: true, n, pos, length: valStr.length });
+                        return;
+                    }
+                    n += step;
+                }
+                self.postMessage({ found: false, lastN: n, processed: chunkSize });
+            };
+        `;
+
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+
+        const cores = navigator.hardwareConcurrency || 4;
+        document.getElementById('threadsVal').textContent = cores;
+
+        let workers = [];
+        let running = false;
+
+        document.getElementById('startBtn').onclick = () => {
+            if(running) return;
+            running = true;
+            const pattern = document.getElementById('pattern').value;
+            let totalProcessed = 0;
+            let startTime = performance.now();
+
+            for(let i = 0; i < cores; i++) {
+                const worker = new Worker(workerUrl);
+                workers.push(worker);
+
+                let currentStart = i;
+                const chunkSize = 200;
+
+                function runBatch(startN) {
+                    worker.postMessage({ start: startN, step: cores, pattern, chunkSize });
+                }
+
+                worker.onmessage = (e) => {
+                    if(!running) return;
+                    if(e.data.found) {
+                        running = false;
+                        workers.forEach(w => w.terminate());
+                        document.getElementById('result').innerHTML = 
+                            \`<h3 style="color:#4ade80">🎉 TROUVÉ !</h3>
+                             <p><strong>2^\${e.data.n}</strong> contient la suite '<strong>\${pattern}</strong>' à l'index \${e.data.pos} (Nombre total de chiffres: \${e.data.length}).</p>\`;
+                    } else {
+                        totalProcessed += chunkSize;
+                        const elapsed = (performance.now() - startTime) / 1000;
+                        document.getElementById('currentN').textContent = e.data.lastN;
+                        document.getElementById('speedVal').textContent = Math.round(totalProcessed / elapsed) + " op/s";
+                        runBatch(e.data.lastN);
+                    }
+                };
+
+                runBatch(currentStart);
+            }
+        };
+    </script>
+</body>
+</html>
